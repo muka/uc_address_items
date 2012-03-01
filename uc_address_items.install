@@ -1,0 +1,79 @@
+<?php
+
+/**
+ * @file
+ * Install, update, and uninstall functions for the uc_address_items module.
+ */
+
+/**
+ * Implements hook_schema().
+ */
+function uc_address_items_schema() {
+  $schema = array();
+
+  $schema['uc_address_items'] = array(
+    'description' => 'Stores additional fields for addresses',
+    'fields' => array(
+      'id' => array(
+        'description' => 'Primary key: the unique id.',
+        'type' => 'serial',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+      ),
+      'order_id' => array(
+        'description' => 'The {uc_orders}.order_id to which this address belongs.',
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'default' => 0,
+      ),
+      'type' => array(
+        'description' => 'The type of address record, like delivery or billing',
+        'type' => 'varchar',
+        'length' => 32,
+        'not null' => FALSE,
+        'default' => NULL,
+      ),
+      'vat' => array(
+        'description' => 'Vat',
+        'type' => 'varchar',
+        'length' => 255,
+        'not null' => TRUE,
+        'default' => '',
+      ),
+      'tax_code' => array(
+        'description' => 'Tax Code',
+        'type' => 'varchar',
+        'length' => 255,
+        'not null' => TRUE,
+        'default' => '',
+      ),
+      'iban' => array(
+        'description' => 'Iban',
+        'type' => 'varchar',
+        'length' => 255,
+        'not null' => TRUE,
+        'default' => '',
+      ),
+    ),
+    'indexes' => array(
+      'order_id' => array('order_id'),
+    ),
+    'primary key' => array('id'),
+    'foreign keys' => array(
+      'order_id' => array('uc_orders' => 'order_id'),
+    ),
+  );
+
+  return $schema;
+}
+
+/**
+ * Implements hook_install().
+ */
+//function uc_address_items_install() {}
+
+/**
+ * Implements hook_uninstall().
+ */
+//function uc_address_items_uninstall() {}

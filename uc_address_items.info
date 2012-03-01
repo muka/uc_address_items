@@ -1,0 +1,5 @@
+core = 7.x
+name = UC Address Items
+description = Add some field items to addresses, to add or remove edit the module _schema() in .install file
+dependencies[] = uc_store
+package = Ubercart - extra

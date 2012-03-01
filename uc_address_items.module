@@ -1,0 +1,356 @@
+<?php
+
+// get *_schema to list the user order related fields, skipping id and order_id
+module_load_include('install', 'uc_address_items', 'uc_address_items');
+module_load_include('inc', 'uc_address_items', 'uc_address_items.order');
+module_load_include('inc', 'uc_address_items', 'uc_address_items.token');
+module_load_include('inc', 'uc_address_items', 'uc_address_items.payments');
+module_load_include('inc', 'uc_address_items', 'uc_address_items.cart');
+
+
+
+module_load_include('php', 'devel', 'krumo/class.krumo');
+
+// load the UcAddress class and extend to specify additional properties
+// module_load_include('inc', 'uc_store', 'address');
+
+/**
+ *
+ * Implementation of hook_form_alter()
+ */
+function uc_address_items_form_alter(&$form, &$form_state, $form_id) {
+    // config: store settings
+    if($form_id == 'uc_store_settings_form'){
+        //$form['address']['address']['#default_value']
+        // add more fields to store information
+        $fields = module_invoke_all("uc_address_items_storeinfo");
+        foreach ($fields as $key => $label) {
+            $form['basic']['uc_store_'.$key] = uc_textfield(t($label), variable_get('uc_store_'.$key, NULL), FALSE, NULL, 32);
+        }
+    }
+    // config: address fields list
+    if($form_id == 'uc_store_address_fields_form') {
+
+        $fields = uc_address_items_list_labels();
+
+        $current = variable_get('uc_address_fields', drupal_map_assoc(array('first_name', 'last_name', 'phone', 'company', 'street1', 'street2', 'city', 'zone', 'postal_code', 'country')));
+        $required = variable_get('uc_address_fields_required', drupal_map_assoc(array('first_name', 'last_name', 'street1', 'city', 'zone', 'postal_code', 'country')));
+        $weight = uc_store_address_field_weights();
+
+        foreach ($fields as $field => $label) {
+            $form['fields'][$field]['enabled'] = array(
+              '#type' => 'checkbox',
+              '#default_value' => isset($current[$field]) ? TRUE : FALSE,
+            );
+            $form['fields'][$field]['required'] = array(
+              '#type' => 'checkbox',
+              '#default_value' => isset($required[$field]) ? TRUE : FALSE,
+            );
+            $form['fields'][$field]['weight'] = array(
+              '#type' => 'weight',
+              '#default_value' => (isset($weight[$field])) ? $weight[$field] : 0,
+              '#attributes' => array('class' => array('uc-store-address-fields-weight')),
+            );
+            $form['fields'][$field]['default'] = array(
+              '#markup' => $label,
+            );
+            $form['fields'][$field]['title'] = array(
+              '#type' => 'textfield',
+              '#default_value' => uc_get_field_name_items($field),
+              '#size' => 32,
+            );
+            $form['fields'][$field]['#weight'] = (isset($weight[$field])) ? $weight[$field] : 99;
+        }
+    }
+}
+
+/**
+ *
+ * Implementation of hook_uc_address_items_storeinfo()
+ */
+function uc_address_items_uc_address_items_storeinfo() {
+    return uc_address_items_list_labels();
+}
+
+/**
+ * Implements hook_element_info().
+ */
+function uc_address_items_element_info_alter(&$type) {
+
+    if(isset($type['uc_address'])) {
+        $type['uc_address'] = array(
+            '#input' => TRUE,
+            '#required' => TRUE,
+            '#process' => array('uc_store_process_address_field_items'),
+            '#attributes' => array('class' => array('uc-store-address-field')),
+            '#theme_wrappers' => array('container'),
+            '#key_prefix' => '',
+//            '#submit' => 'uc_addresses_items_uc_address_submit',
+            '#hidden' => FALSE,
+        );
+    }
+
+}
+
+function uc_address_items_get_types() {
+
+    // list avail address types
+    $types = array('billing', 'delivery');
+
+    return $types;
+}
+
+/**
+ *
+ * Handles uc_address submit
+ */
+/*
+function uc_addresses_items_uc_address_submit($form, &$form_state) {
+
+    krumo($form_state);die();
+
+}
+*/
+
+/**
+ *
+ * Process callback for 'uc_address' element
+ *
+ */
+function uc_store_process_address_field_items($element, $form_state) {
+
+    $element = uc_store_process_address_field( $element, $form_state );
+
+    // skip if in uc_store admin config form
+    if($element['#key_prefix'] == 'uc_store'){
+        return $element;
+    }
+
+    
+    $prefix = $element['#key_prefix'] ? ($element['#key_prefix'] . '_') : '';
+    $weight = uc_store_address_field_weights();
+
+    if (isset($form_state['uc_address'])) {
+        // Use submitted Ajax values.
+        $value = $form_state['uc_address'];
+    }
+    elseif (is_array($element['#value']) || is_object($element['#value'])) {
+        // Use provided default value.
+        $value = (array) $element['#value'];
+    }
+    else {
+        $value = array();
+    }
+
+
+    $address = drupal_map_assoc( array_keys( uc_address_items_list() ));
+    foreach ($address as $base_field => $field_value) {
+        $field = $prefix . $base_field;
+        
+//        if (!isset($value[$field])) { continue; }
+
+        $subelement = array(
+          '#type' => 'textfield',
+          '#size' => 32,
+        );
+
+        // Copy JavaScript states from the parent element.
+        if (isset($element['#states'])) {
+          $subelement['#states'] = $element['#states'];
+        }
+
+        // Set common values for all address fields.
+        // return false for field keys not in uc_get_field_name_items()
+        if($label = uc_get_field_name_items($base_field)) {
+            $element[$field] = $subelement + array(
+              '#title' => $label ? $label : '&nbsp;',
+              '#default_value' => isset($value[$field]) ? $value[$field] : '',
+              '#parents' => array_merge(array_slice($element['#parents'], 0, -1), array($field)),
+              '#pre_render' => array('uc_store_pre_render_address_field'),
+              '#access' => $element['#hidden'] ? FALSE : uc_address_field_enabled($base_field),
+              '#required' => $element['#required'] ? uc_address_field_required($base_field) : FALSE,
+              '#weight' => (isset($weight[$base_field])) ? $weight[$base_field] : 0,
+            );
+        }
+    }
+
+    return $element;
+}
+/**
+ *
+ * Return metadata of schema fields
+ *
+ */
+function uc_address_items_list() {
+
+    // internal db table field to skip enumeration
+    $skip_fields = array( 'id', 'order_id', 'type' );
+
+    $address_items_schema = uc_address_items_schema();
+    $address = $address_items_schema['uc_address_items']['fields'];
+
+    foreach($skip_fields as $key){
+        if(isset($address[$key])){
+            unset($address[$key]);
+        }
+    }
+
+    return $address;
+}
+/**
+ *
+ * Return key => label data from schema, key is field name, label is description.
+ *
+ */
+function uc_address_items_list_labels()
+{
+  $address = uc_address_items_list();
+  $fields = array();
+  foreach($address as $key => $val) {
+      $label = isset($val['description']) ? $val['description'] : ucfirst($key);
+      $fields[ $key ] = t($label);
+  }
+  return $fields;
+}
+
+/**
+ * Returns the name of an address field.
+ */
+function uc_get_field_name_items($field = null) {
+
+  $fields = uc_address_items_list_labels();
+
+  if (!isset($fields[$field])) {
+    return false;
+  }
+
+  return variable_get('uc_field_' . $field, $fields[$field]);
+}
+
+function uc_address_items_get_list( $prefix = "uc_store_" ) {
+
+  $address = uc_address_items_list_labels();
+  $addons = array();
+  foreach ($address as $key => $label) {
+      $addons[ $key ] = variable_get($prefix.$key, '');
+  }
+  return $addons;
+}
+
+/**
+ * Returns the user-defined store address.
+ */
+function uc_address_items_address() {
+
+  $store_address = uc_address_items_format(NULL, NULL, uc_store_name(),
+    variable_get('uc_store_street1', NULL), variable_get('uc_store_street2', NULL),
+    variable_get('uc_store_city', NULL), variable_get('uc_store_zone', NULL),
+    variable_get('uc_store_postal_code', NULL), uc_store_default_country());
+
+  return $store_address;
+}
+
+
+/**
+ * Formats an address for display based on a country's address format.
+ */
+function uc_address_items_format($first_name, $last_name, $company, $street1, $street2, $city, $zone, $postal_code, $country, $others = NULL) {
+
+  if(!$others) {
+      $others = uc_address_items_get_list();
+  }
+
+  $address = uc_address_format($first_name, $last_name, $company, $street1, $street2, $city, $zone, $postal_code, $country);
+
+  $variables = array();
+  foreach ($others as $key => $val) {
+    $variables['!'.$key] = $val;
+  }
+
+  $address = strtr($address, $variables);
+
+/*
+  $match = array('`^<br( /)?>`', '`<br( /)?>$`', '`<br( /)?>(\s*|[\s*<br( /)?>\s*]+)<br( /)?>`', '`<br( /)?><br( /)?>`', '`<br( /)?>, N/A`');
+  $replace = array('', '', '<br />', '<br />', '', '');
+  $address = preg_replace($match, $replace, $address);
+*/
+  
+  return $address;
+}
+
+
+
+/**
+ * Returns an address from an order object.
+ *
+ * @param $order
+ *   An order object.
+ * @param $type
+ *   Either 'delivery' or 'billing'.
+ */
+function uc_address_items_order_address($order, $type) {
+
+  $address_items = array_keys(uc_address_items_list_labels());
+  $address_addons = array();
+  foreach ($address_items as $key) {
+    if( isset( $order->{ $type . '_'.$key } )) {
+      $address_addons[$key] = $order->{ $type . '_'.$key };
+    }
+  }
+
+  $name = $order->{$type . '_first_name'} . ' ' . $order->{$type . '_last_name'};
+  $address = uc_address_items_format(
+    $order->{$type . '_first_name'},
+    $order->{$type . '_last_name'},
+    $order->{$type . '_company'},
+    $order->{$type . '_street1'},
+    $order->{$type . '_street2'},
+    $order->{$type . '_city'},
+    $order->{$type . '_zone'},
+    $order->{$type . '_postal_code'},
+    $order->{$type . '_country'},
+    $address_addons
+  );
+
+  if (variable_get('uc_order_capitalize_addresses', TRUE)) {
+    $address = drupal_strtoupper($address);
+  }
+
+  return $address;
+}
+
+
+
+function uc_address_items_preprocess_uc_order(&$variables) {
+
+
+  $order = &$variables['order'];
+
+  // Generate tokens to use as template variables.
+  $types = array(
+    'uc_order' => $order,
+  );
+
+  $token_info = token_info();
+
+  
+  
+  $replacements = array();
+  foreach (array('store_address_items') as $type) {
+    $replacements[$type] = token_generate($type, drupal_map_assoc(array_keys($token_info['tokens'][$type])), $types);
+  }
+
+//  krumo($replacements);
+
+  foreach ($replacements as $type => $tokens) {
+    foreach ($tokens as $token => $value) {
+      $key = str_replace('-', '_', $type . '_' . $token);
+      $key = str_replace('uc_', '', $key);
+      $variables[$key] = $value;
+    }
+  }
+
+
+//    krumo($variables);
+
+}
